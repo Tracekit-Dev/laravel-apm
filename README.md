@@ -216,8 +216,8 @@ TRACEKIT_INCLUDE_BINDINGS=false
 
 ## Support
 
-- Documentation: [https://docs.tracekit.dev](https://docs.tracekit.dev)
-- Issues: [https://github.com/tracekit/laravel-apm/issues](https://github.com/tracekit/laravel-apm/issues)
+- Documentation: [https://app.tracekit.dev/docs](https://app.tracekit.dev/docs)
+- Issues: [https://github.com/Tracekit-Dev/laravel-apm/issues](https://github.com/Tracekit-Dev/laravel-apm/issues)
 - Email: support@tracekit.dev
 
 ## License

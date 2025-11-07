@@ -40,7 +40,7 @@ class TracekitMiddleware
 
         // Start trace
         $operationName = $this->getOperationName($request);
-        $spanId = $this->client->startTrace($operationName, [
+        $span = $this->client->startTrace($operationName, [
             'http.method' => $request->method(),
             'http.url' => $request->fullUrl(),
             'http.route' => $request->route()?->uri() ?? $request->path(),
@@ -48,13 +48,16 @@ class TracekitMiddleware
             'http.client_ip' => $request->ip(),
         ]);
 
+        // Activate span in context so child spans can use it as parent
+        $scope = $span->activate();
+
         $startTime = microtime(true);
 
         try {
             $response = $next($request);
 
             // Record successful response
-            $this->client->endSpan($spanId, [
+            $this->client->endSpan($span, [
                 'http.status_code' => $response->getStatusCode(),
                 'http.duration_ms' => (int) ((microtime(true) - $startTime) * 1000),
             ], $response->isSuccessful() ? 'OK' : 'ERROR');
@@ -62,14 +65,15 @@ class TracekitMiddleware
             return $response;
         } catch (\Throwable $e) {
             // Record exception
-            $this->client->recordException($spanId, $e);
-            $this->client->endSpan($spanId, [
+            $this->client->recordException($span, $e);
+            $this->client->endSpan($span, [
                 'http.duration_ms' => (int) ((microtime(true) - $startTime) * 1000),
             ], 'ERROR');
 
             throw $e;
         } finally {
-            // Always flush traces
+            // Detach scope and flush traces
+            $scope->detach();
             $this->client->flush();
         }
     }

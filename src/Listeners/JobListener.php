@@ -10,7 +10,7 @@ use TraceKit\Laravel\TracekitClient;
 class JobListener
 {
     private TracekitClient $client;
-    private array $jobSpans = [];
+    private array $jobSpans = []; // Now stores SpanInterface
 
     public function __construct(TracekitClient $client)
     {
@@ -28,7 +28,7 @@ class JobListener
         $connectionName = $event->connectionName;
 
         // Start a new trace for this job
-        $spanId = $this->client->startTrace("job: {$jobName}", [
+        $span = $this->client->startTrace("job: {$jobName}", [
             'job.name' => $jobName,
             'job.connection' => $connectionName,
             'job.queue' => $event->job->getQueue(),
@@ -36,7 +36,7 @@ class JobListener
         ]);
 
         // Store span ID for later
-        $this->jobSpans[$event->job->getJobId()] = $spanId;
+        $this->jobSpans[$event->job->getJobId()] = $span;
     }
 
     public function handleJobProcessed(JobProcessed $event): void
@@ -48,8 +48,8 @@ class JobListener
         $jobId = $event->job->getJobId();
 
         if (isset($this->jobSpans[$jobId])) {
-            $spanId = $this->jobSpans[$jobId];
-            $this->client->endSpan($spanId, [
+            $span = $this->jobSpans[$jobId];
+            $this->client->endSpan($span, [
                 'job.status' => 'completed',
             ], 'OK');
             $this->client->flush();
@@ -67,9 +67,9 @@ class JobListener
         $jobId = $event->job->getJobId();
 
         if (isset($this->jobSpans[$jobId])) {
-            $spanId = $this->jobSpans[$jobId];
-            $this->client->recordException($spanId, $event->exception);
-            $this->client->endSpan($spanId, [
+            $span = $this->jobSpans[$jobId];
+            $this->client->recordException($span, $event->exception);
+            $this->client->endSpan($span, [
                 'job.status' => 'failed',
                 'job.failed_reason' => $event->exception->getMessage(),
             ], 'ERROR');

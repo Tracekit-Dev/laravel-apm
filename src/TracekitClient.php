@@ -2,252 +2,175 @@
 
 namespace TraceKit\Laravel;
 
-use GuzzleHttp\Client;
-use GuzzleHttp\Exception\GuzzleException;
-use Illuminate\Support\Facades\Log;
+use OpenTelemetry\API\Trace\SpanInterface;
+use OpenTelemetry\API\Trace\SpanKind;
+use OpenTelemetry\API\Trace\StatusCode;
+use OpenTelemetry\API\Trace\TracerInterface;
+use OpenTelemetry\API\Trace\TracerProviderInterface;
+use OpenTelemetry\SDK\Common\Attribute\Attributes;
+use OpenTelemetry\SDK\Resource\ResourceInfo;
+use OpenTelemetry\SDK\Resource\ResourceInfoFactory;
+use OpenTelemetry\SDK\Trace\SpanProcessor\SimpleSpanProcessor;
+use OpenTelemetry\SDK\Trace\TracerProvider;
+use OpenTelemetry\Contrib\Otlp\SpanExporter;
+use OpenTelemetry\Contrib\Otlp\OtlpHttpTransportFactory;
+use OpenTelemetry\SemConv\ResourceAttributes;
 
 class TracekitClient
 {
-    private Client $httpClient;
+    private TracerProviderInterface $tracerProvider;
+    private TracerInterface $tracer;
     private string $endpoint;
     private string $apiKey;
     private string $serviceName;
-    private array $currentSpans = [];
-    private ?string $currentTraceId = null;
-    private ?string $rootSpanId = null;
+    private bool $enabled;
 
     public function __construct()
     {
         $this->endpoint = config('tracekit.endpoint');
         $this->apiKey = config('tracekit.api_key');
         $this->serviceName = config('tracekit.service_name');
+        $this->enabled = config('tracekit.enabled', true);
 
-        $this->httpClient = new Client([
-            'timeout' => 5.0,
-            'headers' => [
-                'Content-Type' => 'application/json',
-                'X-API-Key' => $this->apiKey,
-            ],
-        ]);
-    }
+        // Create resource with service name
+        $resource = ResourceInfoFactory::defaultResource()->merge(
+            ResourceInfo::create(Attributes::create([
+                ResourceAttributes::SERVICE_NAME => $this->serviceName,
+            ]))
+        );
 
-    public function startTrace(string $operationName, array $attributes = []): string
-    {
-        $this->currentTraceId = $this->generateId(16);
-        $this->rootSpanId = $this->generateId(8);
+        // Create span processors
+        $spanProcessors = [];
 
-        $span = [
-            'traceId' => $this->currentTraceId,
-            'spanId' => $this->rootSpanId,
-            'parentSpanId' => null,
-            'name' => $operationName,
-            'kind' => 'SERVER',
-            'startTime' => $this->currentTimeMicros(),
-            'endTime' => null,
-            'attributes' => array_merge($attributes, [
-                'service.name' => $this->serviceName,
-            ]),
-            'status' => 'UNSET',
-            'events' => [],
-        ];
+        if ($this->enabled && $this->apiKey) {
+            // Configure OTLP HTTP transport
+            $transportFactory = new OtlpHttpTransportFactory();
+            $transport = $transportFactory->create(
+                $this->endpoint,
+                'application/json',
+                [
+                    'X-API-Key' => $this->apiKey,
+                ]
+            );
 
-        $this->currentSpans[$this->rootSpanId] = $span;
+            // Create OTLP exporter with transport
+            $exporter = new SpanExporter($transport);
 
-        return $this->rootSpanId;
-    }
-
-    public function startSpan(string $operationName, ?string $parentSpanId = null, array $attributes = []): string
-    {
-        if (!$this->currentTraceId) {
-            return $this->startTrace($operationName, $attributes);
+            // Create span processor
+            $spanProcessors[] = new SimpleSpanProcessor($exporter);
         }
 
-        $spanId = $this->generateId(8);
-        $parent = $parentSpanId ?? $this->rootSpanId;
+        // Initialize tracer provider with processors
+        $this->tracerProvider = new TracerProvider(
+            $spanProcessors,
+            null,
+            $resource
+        );
 
-        $span = [
-            'traceId' => $this->currentTraceId,
-            'spanId' => $spanId,
-            'parentSpanId' => $parent,
-            'name' => $operationName,
-            'kind' => 'INTERNAL',
-            'startTime' => $this->currentTimeMicros(),
-            'endTime' => null,
-            'attributes' => array_merge($attributes, [
-                'service.name' => $this->serviceName,
-            ]),
-            'status' => 'UNSET',
-            'events' => [],
-        ];
-
-        $this->currentSpans[$spanId] = $span;
-
-        return $spanId;
-    }
-
-    public function endSpan(string $spanId, array $finalAttributes = [], ?string $status = 'OK'): void
-    {
-        if (!isset($this->currentSpans[$spanId])) {
-            return;
-        }
-
-        $this->currentSpans[$spanId]['endTime'] = $this->currentTimeMicros();
-        $this->currentSpans[$spanId]['status'] = $status;
-        $this->currentSpans[$spanId]['attributes'] = array_merge(
-            $this->currentSpans[$spanId]['attributes'],
-            $finalAttributes
+        // Get tracer instance
+        $this->tracer = $this->tracerProvider->getTracer(
+            'tracekit-laravel',
+            '1.0.0'
         );
     }
 
-    public function addEvent(string $spanId, string $name, array $attributes = []): void
+    public function startTrace(string $operationName, array $attributes = []): SpanInterface
     {
-        if (!isset($this->currentSpans[$spanId])) {
-            return;
-        }
-
-        $this->currentSpans[$spanId]['events'][] = [
-            'name' => $name,
-            'timestamp' => $this->currentTimeMicros(),
-            'attributes' => $attributes,
-        ];
+        return $this->tracer
+            ->spanBuilder($operationName)
+            ->setSpanKind(SpanKind::KIND_SERVER)
+            ->setAttributes($this->normalizeAttributes($attributes))
+            ->startSpan();
     }
 
-    public function recordException(string $spanId, \Throwable $exception): void
+    public function startSpan(
+        string $operationName,
+        ?SpanInterface $parentSpan = null,
+        array $attributes = []
+    ): SpanInterface {
+        $builder = $this->tracer
+            ->spanBuilder($operationName)
+            ->setSpanKind(SpanKind::KIND_INTERNAL)
+            ->setAttributes($this->normalizeAttributes($attributes));
+
+        // Span builder automatically uses current active context
+        // No need to explicitly set parent
+
+        return $builder->startSpan();
+    }
+
+    public function endSpan(SpanInterface $span, array $finalAttributes = [], ?string $status = 'OK'): void
     {
-        if (!isset($this->currentSpans[$spanId])) {
-            return;
+        // Add final attributes
+        if (!empty($finalAttributes)) {
+            $span->setAttributes($this->normalizeAttributes($finalAttributes));
         }
 
-        $this->currentSpans[$spanId]['status'] = 'ERROR';
-        $this->currentSpans[$spanId]['events'][] = [
-            'name' => 'exception',
-            'timestamp' => $this->currentTimeMicros(),
-            'attributes' => [
-                'exception.type' => get_class($exception),
-                'exception.message' => $exception->getMessage(),
-                'exception.stacktrace' => $exception->getTraceAsString(),
-            ],
-        ];
+        // Set status
+        if ($status === 'ERROR') {
+            $span->setStatus(StatusCode::STATUS_ERROR);
+        } elseif ($status === 'OK') {
+            $span->setStatus(StatusCode::STATUS_OK);
+        }
+
+        $span->end();
+    }
+
+    public function addEvent(SpanInterface $span, string $name, array $attributes = []): void
+    {
+        $span->addEvent($name, $this->normalizeAttributes($attributes));
+    }
+
+    public function recordException(SpanInterface $span, \Throwable $exception): void
+    {
+        $span->recordException($exception);
+        $span->setStatus(StatusCode::STATUS_ERROR, $exception->getMessage());
     }
 
     public function flush(): void
     {
-        if (empty($this->currentSpans)) {
-            return;
-        }
-
-        try {
-            $payload = $this->buildOTLPPayload();
-
-            $this->httpClient->post($this->endpoint, [
-                'json' => $payload,
-            ]);
-        } catch (GuzzleException $e) {
-            Log::warning('TraceKit: Failed to send traces', [
-                'error' => $e->getMessage(),
-            ]);
-        } finally {
-            $this->currentSpans = [];
-            $this->currentTraceId = null;
-            $this->rootSpanId = null;
+        if ($this->tracerProvider instanceof TracerProvider) {
+            $this->tracerProvider->forceFlush();
         }
     }
 
-    private function buildOTLPPayload(): array
+    public function shutdown(): void
     {
-        $spans = [];
-
-        foreach ($this->currentSpans as $span) {
-            $spans[] = [
-                'traceId' => $span['traceId'],
-                'spanId' => $span['spanId'],
-                'parentSpanId' => $span['parentSpanId'],
-                'name' => $span['name'],
-                'kind' => $span['kind'],
-                'startTimeUnixNano' => $span['startTime'],
-                'endTimeUnixNano' => $span['endTime'] ?? $this->currentTimeMicros(),
-                'attributes' => $this->formatAttributes($span['attributes']),
-                'status' => [
-                    'code' => $span['status'] === 'OK' ? 1 : ($span['status'] === 'ERROR' ? 2 : 0),
-                ],
-                'events' => array_map(function ($event) {
-                    return [
-                        'name' => $event['name'],
-                        'timeUnixNano' => $event['timestamp'],
-                        'attributes' => $this->formatAttributes($event['attributes']),
-                    ];
-                }, $span['events']),
-            ];
+        if ($this->tracerProvider instanceof TracerProvider) {
+            $this->tracerProvider->shutdown();
         }
-
-        return [
-            'resourceSpans' => [
-                [
-                    'resource' => [
-                        'attributes' => $this->formatAttributes([
-                            'service.name' => $this->serviceName,
-                        ]),
-                    ],
-                    'scopeSpans' => [
-                        [
-                            'scope' => [
-                                'name' => 'tracekit-laravel',
-                                'version' => '1.0.0',
-                            ],
-                            'spans' => $spans,
-                        ],
-                    ],
-                ],
-            ],
-        ];
     }
 
-    private function formatAttributes(array $attributes): array
+    public function getTracer(): TracerInterface
     {
-        $formatted = [];
+        return $this->tracer;
+    }
+
+    private function normalizeAttributes(array $attributes): array
+    {
+        $normalized = [];
 
         foreach ($attributes as $key => $value) {
-            $formatted[] = [
-                'key' => $key,
-                'value' => $this->formatValue($value),
-            ];
+            if (is_string($value) || is_int($value) || is_float($value) || is_bool($value)) {
+                $normalized[$key] = $value;
+            } elseif (is_array($value)) {
+                $normalized[$key] = array_map('strval', $value);
+            } else {
+                $normalized[$key] = (string) $value;
+            }
         }
 
-        return $formatted;
+        return $normalized;
     }
 
-    private function formatValue($value): array
-    {
-        if (is_string($value)) {
-            return ['stringValue' => $value];
-        } elseif (is_int($value)) {
-            return ['intValue' => $value];
-        } elseif (is_float($value)) {
-            return ['doubleValue' => $value];
-        } elseif (is_bool($value)) {
-            return ['boolValue' => $value];
-        }
-
-        return ['stringValue' => (string) $value];
-    }
-
-    private function generateId(int $bytes): string
-    {
-        return bin2hex(random_bytes($bytes));
-    }
-
-    private function currentTimeMicros(): int
-    {
-        return (int) (microtime(true) * 1_000_000_000);
-    }
-
+    // Legacy methods for backwards compatibility
     public function getCurrentTraceId(): ?string
     {
-        return $this->currentTraceId;
+        return null; // Not needed with OpenTelemetry SDK
     }
 
     public function getRootSpanId(): ?string
     {
-        return $this->rootSpanId;
+        return null; // Not needed with OpenTelemetry SDK
     }
 }

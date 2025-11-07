@@ -21,11 +21,6 @@ class QueryListener
             return;
         }
 
-        // Only trace if we have an active trace
-        if (!$this->client->getCurrentTraceId()) {
-            return;
-        }
-
         $duration = $event->time; // milliseconds
         $sql = $event->sql;
         $bindings = config('tracekit.include_query_bindings', true) ? $event->bindings : [];
@@ -47,8 +42,8 @@ class QueryListener
         }
 
         // Create a span for this query
-        $spanId = $this->client->startSpan('db.query', null, $attributes);
-        $this->client->endSpan($spanId, [], $duration > $slowThreshold ? 'ERROR' : 'OK');
+        $span = $this->client->startSpan('db.query', null, $attributes);
+        $this->client->endSpan($span, [], $duration > $slowThreshold ? 'ERROR' : 'OK');
     }
 
     private function bindQueryParameters(string $sql, array $bindings): string

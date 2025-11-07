@@ -54,6 +54,32 @@ php artisan vendor:publish --tag=tracekit-config
 
 This creates `config/tracekit.php` where you can customize:
 
+### Laravel 12 Setup
+
+**Important**: Laravel 12 changed how middleware is registered. You need to manually add the TraceKit middleware to your `bootstrap/app.php`:
+
+```php
+use Illuminate\Foundation\Application;
+use Illuminate\Foundation\Configuration\Middleware;
+use TraceKit\Laravel\Middleware\TracekitMiddleware;
+
+return Application::configure(basePath: dirname(__DIR__))
+    ->withMiddleware(function (Middleware $middleware) {
+        $middleware->web(append: [
+            TracekitMiddleware::class,
+        ]);
+        $middleware->api(append: [
+            TracekitMiddleware::class,
+        ]);
+    })
+    // ... rest of your configuration
+    ->create();
+```
+
+For Laravel 10 and 11, the middleware is registered automatically via the service provider.
+
+### Configuration Options
+
 ```php
 return [
     // Enable/disable tracing
@@ -212,7 +238,7 @@ TRACEKIT_INCLUDE_BINDINGS=false
 ## Requirements
 
 - PHP 8.1 or higher
-- Laravel 10.x or 11.x
+- Laravel 10.x, 11.x, or 12.x
 
 ## Support
 

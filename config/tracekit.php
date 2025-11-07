@@ -6,7 +6,7 @@ return [
     | TraceKit API Key
     |--------------------------------------------------------------------------
     |
-    | Your TraceKit API key. Get one at https://tracekit.dev
+    | Your TraceKit API key. Get one at https://app.tracekit.dev
     |
     */
     'api_key' => env('TRACEKIT_API_KEY', ''),
@@ -19,7 +19,7 @@ return [
     | The OTLP endpoint for sending traces. Default is TraceKit's hosted service.
     |
     */
-    'endpoint' => env('TRACEKIT_ENDPOINT', 'https://tracekit.dev/v1/traces'),
+    'endpoint' => env('TRACEKIT_ENDPOINT', 'https://app.tracekit.dev/v1/traces'),
 
     /*
     |--------------------------------------------------------------------------

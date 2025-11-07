@@ -38,7 +38,7 @@ TRACEKIT_API_KEY=your-api-key-here
 TRACEKIT_SERVICE_NAME=my-laravel-app
 ```
 
-Get your API key at [https://tracekit.dev](https://tracekit.dev)
+Get your API key at [https://app.tracekit.dev](https://app.tracekit.dev)
 
 ### 3. Done!
 

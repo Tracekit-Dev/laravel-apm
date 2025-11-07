@@ -32,7 +32,7 @@ class InstallCommand extends Command
             $this->line('TRACEKIT_API_KEY=your-api-key-here');
             $this->line('TRACEKIT_SERVICE_NAME=' . config('app.name', 'laravel-app'));
             $this->newLine();
-            $this->info('Get your API key at: https://tracekit.dev');
+            $this->info('Get your API key at: https://app.tracekit.dev');
         }
 
         $this->newLine();

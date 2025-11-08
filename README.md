@@ -36,6 +36,9 @@ php artisan tracekit:install
 ```env
 TRACEKIT_API_KEY=your-api-key-here
 TRACEKIT_SERVICE_NAME=my-laravel-app
+
+# Optional: Custom endpoint (defaults to https://app.tracekit.dev/v1/traces)
+# TRACEKIT_ENDPOINT=https://your-custom-endpoint.com/v1/traces
 ```
 
 Get your API key at [https://app.tracekit.dev](https://app.tracekit.dev)
@@ -56,7 +59,9 @@ This creates `config/tracekit.php` where you can customize:
 
 ### Laravel 12 Setup
 
-**Important**: Laravel 12 changed how middleware is registered. You need to manually add the TraceKit middleware to your `bootstrap/app.php`:
+Laravel 12 changed how middleware is registered. TraceKit attempts to register middleware automatically for all Laravel versions (10, 11, and 12).
+
+**If automatic registration doesn't work**, you can manually add the TraceKit middleware to your `bootstrap/app.php`:
 
 ```php
 use Illuminate\Foundation\Application;
@@ -76,7 +81,7 @@ return Application::configure(basePath: dirname(__DIR__))
     ->create();
 ```
 
-For Laravel 10 and 11, the middleware is registered automatically via the service provider.
+For most cases, the automatic registration via the service provider should work without any manual configuration.
 
 ### Configuration Options
 
@@ -88,6 +93,9 @@ return [
     // Your TraceKit API key
     'api_key' => env('TRACEKIT_API_KEY', ''),
 
+    // OTLP endpoint for sending traces
+    'endpoint' => env('TRACEKIT_ENDPOINT', 'https://app.tracekit.dev/v1/traces'),
+
     // Service name as it appears in TraceKit
     'service_name' => env('TRACEKIT_SERVICE_NAME', env('APP_NAME', 'laravel-app')),
 
@@ -96,20 +104,25 @@ return [
 
     // Enable/disable specific features
     'features' => [
-        'http' => true,
-        'database' => true,
-        'cache' => true,
-        'queue' => true,
+        'http' => env('TRACEKIT_HTTP_ENABLED', true),
+        'database' => env('TRACEKIT_DATABASE_ENABLED', true),
+        'cache' => env('TRACEKIT_CACHE_ENABLED', true),      // Coming soon
+        'queue' => env('TRACEKIT_QUEUE_ENABLED', true),
+        'redis' => env('TRACEKIT_REDIS_ENABLED', true),      // Coming soon
     ],
 
     // Routes to ignore
     'ignored_routes' => [
         '/health',
         '/up',
+        '/_healthz',
     ],
 
     // Slow query threshold (ms)
-    'slow_query_threshold' => 100,
+    'slow_query_threshold' => env('TRACEKIT_SLOW_QUERY_MS', 100),
+
+    // Include query bindings in traces
+    'include_query_bindings' => env('TRACEKIT_INCLUDE_BINDINGS', true),
 ];
 ```
 
@@ -154,6 +167,14 @@ All exceptions are automatically captured with:
 - Request context
 - User information
 
+### Coming Soon
+
+The following features are planned for future releases:
+
+- **Cache Operations** - Redis, Memcached, and file cache tracing
+- **Redis Commands** - Direct Redis command tracing
+- **External HTTP Calls** - Outgoing HTTP request tracking
+
 ## Advanced Usage
 
 ### Manual Tracing
@@ -167,7 +188,7 @@ class MyController extends Controller
 {
     public function myMethod(TracekitClient $tracekit)
     {
-        $spanId = $tracekit->startSpan('my-custom-operation', null, [
+        $span = $tracekit->startSpan('my-custom-operation', null, [
             'user.id' => auth()->id(),
             'custom.attribute' => 'value',
         ]);
@@ -176,12 +197,12 @@ class MyController extends Controller
             // Your code here
             $result = $this->doSomething();
 
-            $tracekit->endSpan($spanId, [
+            $tracekit->endSpan($span, [
                 'result.count' => count($result),
             ]);
         } catch (\Exception $e) {
-            $tracekit->recordException($spanId, $e);
-            $tracekit->endSpan($spanId, [], 'ERROR');
+            $tracekit->recordException($span, $e);
+            $tracekit->endSpan($span, [], 'ERROR');
             throw $e;
         }
     }
@@ -202,7 +223,9 @@ Enable only specific features:
 ```env
 TRACEKIT_HTTP_ENABLED=true
 TRACEKIT_DATABASE_ENABLED=true
+TRACEKIT_CACHE_ENABLED=true
 TRACEKIT_QUEUE_ENABLED=false
+TRACEKIT_REDIS_ENABLED=true
 ```
 
 ### Sampling

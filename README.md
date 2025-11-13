@@ -15,6 +15,7 @@ Zero-config distributed tracing and performance monitoring for Laravel applicati
 - **Queue Job Tracking** - Monitor Laravel jobs and queues
 - **Slow Query Detection** - Automatically highlight slow database queries
 - **Error Tracking** - Capture exceptions with full context
+- **Code Monitoring** - Live debugging with breakpoints and variable inspection
 - **Low Overhead** - < 5% performance impact
 
 ## Installation
@@ -46,6 +47,165 @@ Get your API key at [https://app.tracekit.dev](https://app.tracekit.dev)
 ### 3. Done!
 
 Your Laravel app is now automatically traced. Visit your TraceKit dashboard to see your traces.
+
+## Code Monitoring (Live Debugging)
+
+TraceKit includes production-safe code monitoring for live debugging without redeployment.
+
+### Enable Code Monitoring
+
+Add to your `.env` file:
+
+```env
+TRACEKIT_CODE_MONITORING_ENABLED=true
+TRACEKIT_CODE_MONITORING_POLL_INTERVAL=30  # How often to check for breakpoints (seconds)
+                                            # Supported: 1, 5, 10, 15, 30, 60, 300, 600
+                                            # Lower = faster updates, higher load
+TRACEKIT_CODE_MONITORING_MAX_DEPTH=3       # Nested array/object inspection depth
+TRACEKIT_CODE_MONITORING_MAX_STRING=1000   # Max length for captured strings
+```
+
+**Configuration Options:**
+
+- **`enabled`**: Master switch for code monitoring (default: `false`)
+- **`poll_interval`**: Background polling frequency in seconds (default: `30`)
+  - `1` = Every second (highest load, instant updates)
+  - `5` = Every 5 seconds (high load, very fast updates)
+  - `10` = Every 10 seconds (moderate load, fast updates)
+  - `30` = Every 30 seconds (recommended for production)
+  - `60` = Every minute (low load, slower updates)
+  - `300+` = Every 5+ minutes (very low load, periodic checks)
+- **`max_variable_depth`**: How deep to inspect nested structures (default: `3`)
+- **`max_string_length`**: Maximum string length to capture (default: `1000`)
+
+### Add Debug Points
+
+Add checkpoints anywhere in your code to capture variable state and stack traces:
+
+```php
+<?php
+
+namespace App\Http\Controllers;
+
+use Illuminate\Http\Request;
+
+class CheckoutController extends Controller
+{
+    public function processPayment(Request $request)
+    {
+        $cart = $request->input('cart');
+        $userId = $request->input('user_id');
+
+        // Automatic snapshot capture with label
+        tracekit_snapshot('checkout-validation', [
+            'user_id' => $userId,
+            'cart_items' => count($cart['items'] ?? []),
+            'total_amount' => $cart['total'] ?? 0,
+        ]);
+
+        try {
+            // Process payment
+            $result = $this->paymentService->charge($cart['total'], $userId);
+
+            // Another checkpoint
+            tracekit_snapshot('payment-success', [
+                'user_id' => $userId,
+                'payment_id' => $result['payment_id'],
+                'amount' => $result['amount'],
+            ]);
+
+            return response()->json(['success' => true]);
+
+        } catch (\Exception $e) {
+            // Automatic error capture (configured in service provider)
+            tracekit_error_snapshot($e, [
+                'user_id' => $userId,
+                'cart_total' => $cart['total'] ?? 0,
+            ]);
+
+            return response()->json(['error' => 'Payment failed'], 500);
+        }
+    }
+}
+```
+
+### Helper Functions
+
+TraceKit provides convenient helper functions:
+
+```php
+// Basic snapshot capture
+tracekit_snapshot('my-label', ['key' => 'value']);
+
+// Debug helper (logs + captures)
+tracekit_debug('debug-point', ['data' => $data]);
+
+// Error snapshot with exception details
+tracekit_error_snapshot($exception, ['context' => 'additional data']);
+```
+
+### Automatic Breakpoint Management
+
+- **Auto-Registration**: First call to `tracekit_snapshot()` automatically creates breakpoints in TraceKit
+- **Smart Matching**: Breakpoints match by function name + label (stable across code changes)
+- **Background Sync**: SDK polls for active breakpoints every 30 seconds
+- **Production Safe**: No performance impact when breakpoints are inactive
+
+### What Gets Captured
+
+Snapshots include:
+- **Variables**: Local variables at capture point
+- **Stack Trace**: Full call stack with file/line numbers
+- **Request Context**: HTTP method, URL, headers, query params
+- **Execution Time**: When the snapshot was captured
+- **Eloquent Models**: Automatically serialized with relationships
+
+### Exception Handling
+
+**Exceptions are automatically captured** when `TRACEKIT_CODE_MONITORING_ENABLED=true` - no additional code required!
+
+The TraceKit service provider automatically registers an exception reporter that:
+- Captures full stack traces with file and line numbers
+- Records exception type, message, and context
+- Includes HTTP request details (route, headers, params)
+- Enables automatic code discovery for debugging
+
+```php
+// Exceptions are automatically captured - just throw them as normal!
+Route::post('/payment', function (Request $request) {
+    if (!$request->has('amount')) {
+        // This exception will be automatically captured with full context
+        throw new \Exception('Amount is required');
+    }
+    
+    $payment = Payment::process($request->amount);
+    return response()->json(['payment_id' => $payment->id]);
+});
+
+// You can also manually add snapshots before throwing
+Route::post('/checkout', function (Request $request) {
+    try {
+        $order = Order::create($request->all());
+    } catch (\Exception $e) {
+        // Optional: Add additional context before exception is auto-captured
+        tracekit_snapshot('checkout-failed', [
+            'cart_total' => $request->input('total'),
+            'user_id' => auth()->id(),
+            'error' => $e->getMessage(),
+        ]);
+        
+        throw $e; // Still automatically captured!
+    }
+});
+```
+
+**How It Works:**
+
+1. Any uncaught exception is automatically reported to TraceKit
+2. Stack trace is formatted and attached to the current OpenTelemetry span
+3. Exception event includes `exception.stacktrace` for code discovery
+4. TraceKit backend parses stack traces and indexes your code locations
+5. Visit the "Browse Code" tab in `/snapshots` to see discovered code
 
 ## Configuration
 

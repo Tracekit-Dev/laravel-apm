@@ -101,4 +101,26 @@ return [
     |
     */
     'include_query_bindings' => env('TRACEKIT_INCLUDE_BINDINGS', true),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Code Monitoring
+    |--------------------------------------------------------------------------
+    |
+    | Enable live code debugging with breakpoints and variable inspection.
+    | 
+    | - enabled: Master switch for code monitoring features
+    | - poll_interval: How often to check for new breakpoints (in seconds)
+    |   Supported intervals: 1, 5, 10, 15, 30, 60, 300, 600
+    |   Lower values = faster breakpoint updates, higher server load
+    | - max_variable_depth: How deep to inspect nested arrays/objects
+    | - max_string_length: Maximum length of captured string values
+    |
+    */
+    'code_monitoring' => [
+        'enabled' => env('TRACEKIT_CODE_MONITORING_ENABLED', false),
+        'poll_interval' => env('TRACEKIT_CODE_MONITORING_POLL_INTERVAL', 30), // seconds
+        'max_variable_depth' => env('TRACEKIT_CODE_MONITORING_MAX_DEPTH', 3), // nested array/object depth
+        'max_string_length' => env('TRACEKIT_CODE_MONITORING_MAX_STRING', 1000), // truncate long strings
+    ],
 ];

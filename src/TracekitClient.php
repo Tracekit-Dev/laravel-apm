@@ -123,8 +123,43 @@ class TracekitClient
 
     public function recordException(SpanInterface $span, \Throwable $exception): void
     {
+        // Format stack trace for code discovery
+        $stacktrace = $this->formatStackTrace($exception);
+        
+        // Add exception event with formatted stack trace
+        $span->addEvent('exception', [
+            'exception.type' => get_class($exception),
+            'exception.message' => $exception->getMessage(),
+            'exception.stacktrace' => $stacktrace,
+        ]);
+        
+        // Also use OpenTelemetry's built-in exception recording
         $span->recordException($exception);
         $span->setStatus(StatusCode::STATUS_ERROR, $exception->getMessage());
+    }
+    
+    /**
+     * Format exception stack trace for code discovery
+     */
+    private function formatStackTrace(\Throwable $exception): string
+    {
+        $frames = [];
+        // First line: where the exception was thrown
+        $frames[] = $exception->getFile() . ':' . $exception->getLine();
+        
+        foreach ($exception->getTrace() as $frame) {
+            $file = $frame['file'] ?? '';
+            $line = $frame['line'] ?? 0;
+            $function = $frame['function'] ?? '';
+            $class = $frame['class'] ?? '';
+            
+            if ($file && $line) {
+                $functionName = $class ? "$class::$function" : $function;
+                $frames[] = "$functionName at $file:$line";
+            }
+        }
+        
+        return implode("\n", $frames);
     }
 
     public function flush(): void

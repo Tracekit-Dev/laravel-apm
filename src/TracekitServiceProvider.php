@@ -12,6 +12,7 @@ use TraceKit\Laravel\Commands\InstallCommand;
 use TraceKit\Laravel\Listeners\JobListener;
 use TraceKit\Laravel\Listeners\QueryListener;
 use TraceKit\Laravel\Middleware\TracekitMiddleware;
+use TraceKit\Laravel\SnapshotClient;
 
 class TracekitServiceProvider extends ServiceProvider
 {
@@ -26,6 +27,22 @@ class TracekitServiceProvider extends ServiceProvider
         // Register TracekitClient as singleton
         $this->app->singleton(TracekitClient::class, function ($app) {
             return new TracekitClient();
+        });
+
+        // Register SnapshotClient as singleton
+        $this->app->singleton(SnapshotClient::class, function ($app) {
+            // Extract base URL from endpoint (remove /v1/traces suffix)
+            $endpoint = config('tracekit.endpoint');
+            $baseURL = preg_replace('#/v1/traces$#', '', $endpoint);
+            
+            return new SnapshotClient(
+                config('tracekit.api_key'),
+                $baseURL,
+                config('tracekit.service_name'),
+                config('tracekit.code_monitoring.poll_interval', 30),
+                config('tracekit.code_monitoring.max_variable_depth', 3),
+                config('tracekit.code_monitoring.max_string_length', 1000)
+            );
         });
     }
 
@@ -78,6 +95,47 @@ class TracekitServiceProvider extends ServiceProvider
             Event::listen(JobProcessing::class, [$jobListener, 'handleJobProcessing']);
             Event::listen(JobProcessed::class, [$jobListener, 'handleJobProcessed']);
             Event::listen(JobFailed::class, [$jobListener, 'handleJobFailed']);
+        }
+
+        // Register exception reporter for tracing
+        if (config('tracekit.enabled')) {
+            $this->app->make(\Illuminate\Contracts\Debug\ExceptionHandler::class)
+                ->reportable(function (\Throwable $e) {
+                    $tracekitClient = $this->app->make(TracekitClient::class);
+                    
+                    // Get the current span from the tracer
+                    $tracer = $tracekitClient->getTracer();
+                    $span = \OpenTelemetry\API\Trace\Span::getCurrent();
+                    
+                    // Only record if we have an active span
+                    if ($span->getContext()->isValid()) {
+                        $tracekitClient->recordException($span, $e);
+                    }
+                });
+        }
+
+        // Initialize code monitoring
+        if (config('tracekit.enabled') && config('tracekit.code_monitoring.enabled')) {
+            $snapshotClient = $this->app->make(SnapshotClient::class);
+            $snapshotClient->start();
+
+            // Register exception listener for automatic error capture
+            Event::listen(\Illuminate\Foundation\Exceptions\Handler::class, function ($event) {
+                if ($event instanceof \Throwable) {
+                    $snapshotClient = app(SnapshotClient::class);
+                    $snapshotClient->checkAndCaptureWithContext(
+                        null, // Will extract from current request
+                        'exception_' . class_basename($event),
+                        [
+                            'exception_type' => get_class($event),
+                            'message' => $event->getMessage(),
+                            'code' => $event->getCode(),
+                            'file' => $event->getFile(),
+                            'line' => $event->getLine(),
+                        ]
+                    );
+                }
+            });
         }
 
         // Register commands

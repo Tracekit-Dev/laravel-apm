@@ -1,6 +1,6 @@
 {
     "name": "tracekit/laravel-apm",
-    "description": "TraceKit APM for Laravel - Zero-config distributed tracing and performance monitoring",
+    "description": "TraceKit APM for Laravel - Zero-config distributed tracing and code monitoring",
     "keywords": ["laravel", "apm", "tracing", "monitoring", "opentelemetry", "performance"],
     "type": "library",
     "license": "MIT",
@@ -14,6 +14,8 @@
         "php": "^8.1",
         "illuminate/support": "^10.0|^11.0|^12.0",
         "illuminate/database": "^10.0|^11.0|^12.0",
+        "illuminate/cache": "^10.0|^11.0|^12.0",
+        "guzzlehttp/guzzle": "^7.0",
         "open-telemetry/sdk": "^1.0",
         "open-telemetry/exporter-otlp": "^1.0",
         "open-telemetry/api": "^1.0"
@@ -25,7 +27,10 @@
     "autoload": {
         "psr-4": {
             "TraceKit\\Laravel\\": "src/"
-        }
+        },
+        "files": [
+            "src/helpers.php"
+        ]
     },
     "autoload-dev": {
         "psr-4": {

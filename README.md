@@ -48,6 +48,85 @@ Get your API key at [https://app.tracekit.dev](https://app.tracekit.dev)
 
 Your Laravel app is now automatically traced. Visit your TraceKit dashboard to see your traces.
 
+## Configuration
+
+Publish the configuration file:
+
+```bash
+php artisan vendor:publish --tag=tracekit-config
+```
+
+This creates `config/tracekit.php` where you can customize:
+
+### Laravel 12 Setup
+
+Laravel 12 changed how middleware is registered. TraceKit attempts to register middleware automatically for all Laravel versions (10, 11, and 12).
+
+**If automatic registration doesn't work**, you can manually add the TraceKit middleware to your `bootstrap/app.php`:
+
+```php
+use Illuminate\Foundation\Application;
+use Illuminate\Foundation\Configuration\Middleware;
+use TraceKit\Laravel\Middleware\TracekitMiddleware;
+
+return Application::configure(basePath: dirname(__DIR__))
+    ->withMiddleware(function (Middleware $middleware) {
+        $middleware->web(append: [
+            TracekitMiddleware::class,
+        ]);
+        $middleware->api(append: [
+            TracekitMiddleware::class,
+        ]);
+    })
+    // ... rest of your configuration
+    ->create();
+```
+
+For most cases, the automatic registration via the service provider should work without any manual configuration.
+
+### Configuration Options
+
+```php
+return [
+    // Enable/disable tracing
+    'enabled' => env('TRACEKIT_ENABLED', env('APP_ENV') !== 'local'),
+
+    // Your TraceKit API key
+    'api_key' => env('TRACEKIT_API_KEY', ''),
+
+    // OTLP endpoint for sending traces
+    'endpoint' => env('TRACEKIT_ENDPOINT', 'https://app.tracekit.dev/v1/traces'),
+
+    // Service name as it appears in TraceKit
+    'service_name' => env('TRACEKIT_SERVICE_NAME', env('APP_NAME', 'laravel-app')),
+
+    // Sample rate (0.0 to 1.0)
+    'sample_rate' => env('TRACEKIT_SAMPLE_RATE', 1.0),
+
+    // Enable/disable specific features
+    'features' => [
+        'http' => env('TRACEKIT_HTTP_ENABLED', true),
+        'database' => env('TRACEKIT_DATABASE_ENABLED', true),
+        'cache' => env('TRACEKIT_CACHE_ENABLED', true),      // Coming soon
+        'queue' => env('TRACEKIT_QUEUE_ENABLED', true),
+        'redis' => env('TRACEKIT_REDIS_ENABLED', true),      // Coming soon
+    ],
+
+    // Routes to ignore
+    'ignored_routes' => [
+        '/health',
+        '/up',
+        '/_healthz',
+    ],
+
+    // Slow query threshold (ms)
+    'slow_query_threshold' => env('TRACEKIT_SLOW_QUERY_MS', 100),
+
+    // Include query bindings in traces
+    'include_query_bindings' => env('TRACEKIT_INCLUDE_BINDINGS', true),
+];
+```
+
 ## Code Monitoring (Live Debugging)
 
 TraceKit includes production-safe code monitoring for live debugging without redeployment.
@@ -206,85 +285,6 @@ Route::post('/checkout', function (Request $request) {
 3. Exception event includes `exception.stacktrace` for code discovery
 4. TraceKit backend parses stack traces and indexes your code locations
 5. Visit the "Browse Code" tab in `/snapshots` to see discovered code
-
-## Configuration
-
-Publish the configuration file:
-
-```bash
-php artisan vendor:publish --tag=tracekit-config
-```
-
-This creates `config/tracekit.php` where you can customize:
-
-### Laravel 12 Setup
-
-Laravel 12 changed how middleware is registered. TraceKit attempts to register middleware automatically for all Laravel versions (10, 11, and 12).
-
-**If automatic registration doesn't work**, you can manually add the TraceKit middleware to your `bootstrap/app.php`:
-
-```php
-use Illuminate\Foundation\Application;
-use Illuminate\Foundation\Configuration\Middleware;
-use TraceKit\Laravel\Middleware\TracekitMiddleware;
-
-return Application::configure(basePath: dirname(__DIR__))
-    ->withMiddleware(function (Middleware $middleware) {
-        $middleware->web(append: [
-            TracekitMiddleware::class,
-        ]);
-        $middleware->api(append: [
-            TracekitMiddleware::class,
-        ]);
-    })
-    // ... rest of your configuration
-    ->create();
-```
-
-For most cases, the automatic registration via the service provider should work without any manual configuration.
-
-### Configuration Options
-
-```php
-return [
-    // Enable/disable tracing
-    'enabled' => env('TRACEKIT_ENABLED', env('APP_ENV') !== 'local'),
-
-    // Your TraceKit API key
-    'api_key' => env('TRACEKIT_API_KEY', ''),
-
-    // OTLP endpoint for sending traces
-    'endpoint' => env('TRACEKIT_ENDPOINT', 'https://app.tracekit.dev/v1/traces'),
-
-    // Service name as it appears in TraceKit
-    'service_name' => env('TRACEKIT_SERVICE_NAME', env('APP_NAME', 'laravel-app')),
-
-    // Sample rate (0.0 to 1.0)
-    'sample_rate' => env('TRACEKIT_SAMPLE_RATE', 1.0),
-
-    // Enable/disable specific features
-    'features' => [
-        'http' => env('TRACEKIT_HTTP_ENABLED', true),
-        'database' => env('TRACEKIT_DATABASE_ENABLED', true),
-        'cache' => env('TRACEKIT_CACHE_ENABLED', true),      // Coming soon
-        'queue' => env('TRACEKIT_QUEUE_ENABLED', true),
-        'redis' => env('TRACEKIT_REDIS_ENABLED', true),      // Coming soon
-    ],
-
-    // Routes to ignore
-    'ignored_routes' => [
-        '/health',
-        '/up',
-        '/_healthz',
-    ],
-
-    // Slow query threshold (ms)
-    'slow_query_threshold' => env('TRACEKIT_SLOW_QUERY_MS', 100),
-
-    // Include query bindings in traces
-    'include_query_bindings' => env('TRACEKIT_INCLUDE_BINDINGS', true),
-];
-```
 
 ## What Gets Traced?
 

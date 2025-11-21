@@ -7,6 +7,7 @@ use OpenTelemetry\API\Trace\SpanKind;
 use OpenTelemetry\API\Trace\StatusCode;
 use OpenTelemetry\API\Trace\TracerInterface;
 use OpenTelemetry\API\Trace\TracerProviderInterface;
+use OpenTelemetry\Context\ContextInterface;
 use OpenTelemetry\SDK\Common\Attribute\Attributes;
 use OpenTelemetry\SDK\Resource\ResourceInfo;
 use OpenTelemetry\SDK\Resource\ResourceInfoFactory;
@@ -31,6 +32,12 @@ class TracekitClient
         $this->apiKey = config('tracekit.api_key');
         $this->serviceName = config('tracekit.service_name');
         $this->enabled = config('tracekit.enabled', true);
+
+        // Suppress OpenTelemetry error output (export failures, etc.) in development
+        // Set TRACEKIT_SUPPRESS_ERRORS=false in .env to see export errors
+        if (config('tracekit.suppress_errors', true)) {
+            $this->suppressOpenTelemetryErrors();
+        }
 
         // Create resource with service name
         $resource = ResourceInfoFactory::defaultResource()->merge(
@@ -81,6 +88,27 @@ class TracekitClient
             ->setSpanKind(SpanKind::KIND_SERVER)
             ->setAttributes($this->normalizeAttributes($attributes))
             ->startSpan();
+    }
+
+    /**
+     * Start a SERVER span with optional parent context from traceparent header.
+     * This is used by middleware to create spans that are children of incoming trace context.
+     */
+    public function startServerSpan(
+        string $operationName,
+        array $attributes = [],
+        ?ContextInterface $parentContext = null
+    ): SpanInterface {
+        $builder = $this->tracer
+            ->spanBuilder($operationName)
+            ->setSpanKind(SpanKind::KIND_SERVER)
+            ->setAttributes($this->normalizeAttributes($attributes));
+
+        if ($parentContext !== null) {
+            $builder->setParent($parentContext);
+        }
+
+        return $builder->startSpan();
     }
 
     public function startSpan(
@@ -179,6 +207,31 @@ class TracekitClient
     public function getTracer(): TracerInterface
     {
         return $this->tracer;
+    }
+
+    /**
+     * Suppress OpenTelemetry internal error output (export failures, etc.)
+     * This prevents noisy error messages when running without a valid API key
+     */
+    private function suppressOpenTelemetryErrors(): void
+    {
+        // Set environment variable to disable OpenTelemetry error logging
+        putenv('OTEL_PHP_LOG_DESTINATION=none');
+
+        // Also register a custom error handler that filters out OpenTelemetry errors
+        $previousHandler = set_error_handler(function ($errno, $errstr, $errfile, $errline) use (&$previousHandler) {
+            // Suppress OpenTelemetry-related errors
+            if (str_contains($errfile, 'open-telemetry') || str_contains($errstr, 'OpenTelemetry')) {
+                return true; // Suppress the error
+            }
+
+            // Call previous handler for other errors
+            if ($previousHandler) {
+                return $previousHandler($errno, $errstr, $errfile, $errline);
+            }
+
+            return false; // Let PHP handle it
+        });
     }
 
     private function normalizeAttributes(array $attributes): array

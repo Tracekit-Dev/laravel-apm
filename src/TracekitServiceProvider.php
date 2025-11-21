@@ -12,6 +12,7 @@ use TraceKit\Laravel\Commands\InstallCommand;
 use TraceKit\Laravel\Listeners\JobListener;
 use TraceKit\Laravel\Listeners\QueryListener;
 use TraceKit\Laravel\Middleware\TracekitMiddleware;
+use TraceKit\Laravel\Middleware\HttpClientMiddleware;
 use TraceKit\Laravel\SnapshotClient;
 
 class TracekitServiceProvider extends ServiceProvider
@@ -95,6 +96,12 @@ class TracekitServiceProvider extends ServiceProvider
             Event::listen(JobProcessing::class, [$jobListener, 'handleJobProcessing']);
             Event::listen(JobProcessed::class, [$jobListener, 'handleJobProcessed']);
             Event::listen(JobFailed::class, [$jobListener, 'handleJobFailed']);
+        }
+
+        // Register HTTP client instrumentation for outgoing requests
+        if (config('tracekit.enabled') && config('tracekit.auto_instrument_http_client', true)) {
+            $httpClientMiddleware = new HttpClientMiddleware();
+            $httpClientMiddleware->register();
         }
 
         // Register exception reporter for tracing

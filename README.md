@@ -124,6 +124,12 @@ return [
 
     // Include query bindings in traces
     'include_query_bindings' => env('TRACEKIT_INCLUDE_BINDINGS', true),
+
+    // Map hostnames to service names for service graph
+    'service_name_mappings' => [
+        'localhost:8082' => 'payment-service',
+        'localhost:8083' => 'user-service',
+    ],
 ];
 ```
 
@@ -286,11 +292,138 @@ Route::post('/checkout', function (Request $request) {
 4. TraceKit backend parses stack traces and indexes your code locations
 5. Visit the "Browse Code" tab in `/snapshots` to see discovered code
 
+## Automatic Service Discovery
+
+TraceKit automatically instruments **outgoing HTTP calls** made with Laravel's HTTP client to create service dependency graphs.
+
+### How It Works
+
+When your service makes an HTTP request using Laravel's `Http` facade:
+
+1. ✅ TraceKit creates a **CLIENT span** for the outgoing request
+2. ✅ Trace context is automatically injected into request headers (`traceparent`)
+3. ✅ The receiving service creates a **SERVER span** linked to your CLIENT span
+4. ✅ TraceKit maps the dependency: **YourService → TargetService**
+
+### Supported HTTP Clients
+
+- ✅ **Laravel HTTP Client** (`Illuminate\Support\Facades\Http`) - Automatic!
+- ✅ **Guzzle** (Laravel's HTTP client uses Guzzle under the hood)
+
+**Zero configuration required!** Just use Laravel's HTTP client as normal:
+
+```php
+use Illuminate\Support\Facades\Http;
+
+// All of these automatically create CLIENT spans:
+Http::get('http://payment-service/charge');
+Http::post('http://inventory-service/reserve', ['item_id' => 123]);
+Http::withToken($token)->get('http://user-service/profile/123');
+```
+
+### Service Name Detection
+
+TraceKit intelligently extracts service names from URLs:
+
+| URL | Extracted Service Name |
+|-----|------------------------|
+| `http://payment-service:3000` | `payment-service` |
+| `http://payment.internal` | `payment` |
+| `http://payment.svc.cluster.local` | `payment` |
+| `https://api.example.com` | `api.example.com` |
+
+This works seamlessly with:
+- Kubernetes service names
+- Internal DNS names
+- Docker Compose service names
+- External APIs
+
+### Custom Service Name Mappings
+
+For local development or when service names can't be inferred from hostnames, add `service_name_mappings` to your `config/tracekit.php`:
+
+```php
+return [
+    // ... other config
+
+    // Map localhost URLs to actual service names
+    'service_name_mappings' => [
+        'localhost:8082' => 'payment-service',
+        'localhost:8083' => 'user-service',
+        'localhost:8084' => 'inventory-service',
+        'localhost:5001' => 'analytics-service',
+    ],
+];
+```
+
+Then make HTTP calls as normal:
+
+```php
+use Illuminate\Support\Facades\Http;
+
+// Now requests to localhost:8082 will show as "payment-service" in the service graph
+$response = Http::get('http://localhost:8082/charge');
+// -> Creates CLIENT span with peer.service = "payment-service"
+```
+
+This is especially useful when:
+- Running microservices locally on different ports
+- Using Docker Compose with localhost networking
+- Testing distributed tracing in development
+
+### Example: Multi-Service Application
+
+```php
+use Illuminate\Support\Facades\Http;
+
+Route::post('/checkout', function (Request $request) {
+    // This HTTP call automatically creates a CLIENT span
+    $paymentResponse = Http::post('http://payment-service/charge', [
+        'amount' => $request->input('amount'),
+        'user_id' => auth()->id(),
+    ]);
+
+    // This one too!
+    $inventoryResponse = Http::post('http://inventory-service/reserve', [
+        'item_id' => $request->input('item_id'),
+    ]);
+
+    return response()->json([
+        'status' => 'success',
+        'payment_id' => $paymentResponse['payment_id'],
+    ]);
+});
+```
+
+### Viewing Service Dependencies
+
+Visit your TraceKit dashboard to see:
+
+- **Service Map**: Visual graph showing which services call which
+- **Service List**: Table of all services with health metrics
+- **Service Detail**: Deep dive on individual services with upstream/downstream dependencies
+
+### Disabling Auto-Instrumentation
+
+Add to your `.env` file:
+
+```env
+TRACEKIT_AUTO_INSTRUMENT_HTTP_CLIENT=false
+```
+
+Or in `config/tracekit.php`:
+
+```php
+return [
+    'auto_instrument_http_client' => env('TRACEKIT_AUTO_INSTRUMENT_HTTP_CLIENT', true),
+];
+```
+
 ## What Gets Traced?
 
-### HTTP Requests
+### Incoming HTTP Requests (SERVER spans)
 
-Every HTTP request is automatically traced with:
+Every HTTP request to your Laravel app is automatically traced with:
 
 - Route name and URI
 - HTTP method and status code
@@ -298,6 +431,15 @@ Every HTTP request is automatically traced with:
 - User agent and client IP
 - Query parameters
 - Response size
+
+### Outgoing HTTP Requests (CLIENT spans)
+
+Every HTTP request from your Laravel app is automatically traced with:
+
+- Target URL and HTTP method
+- HTTP status code
+- Request duration
+- `peer.service` attribute for service dependency mapping
 
 ### Database Queries
 

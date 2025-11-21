@@ -6,14 +6,17 @@ use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 use TraceKit\Laravel\TracekitClient;
+use OpenTelemetry\API\Trace\Propagation\TraceContextPropagator;
 
 class TracekitMiddleware
 {
     private TracekitClient $client;
+    private TraceContextPropagator $propagator;
 
     public function __construct(TracekitClient $client)
     {
         $this->client = $client;
+        $this->propagator = TraceContextPropagator::getInstance();
     }
 
     public function handle(Request $request, Closure $next): Response
@@ -38,15 +41,25 @@ class TracekitMiddleware
             return $next($request);
         }
 
-        // Start trace
+        // Extract trace context from incoming request headers (W3C Trace Context)
+        // This enables distributed tracing - the span will be linked to the parent trace
+        $headers = $request->headers->all();
+        // Flatten headers (Laravel returns arrays)
+        $flatHeaders = [];
+        foreach ($headers as $key => $values) {
+            $flatHeaders[$key] = is_array($values) ? $values[0] : $values;
+        }
+        $parentContext = $this->propagator->extract($flatHeaders);
+
+        // Start trace with parent context (if any)
         $operationName = $this->getOperationName($request);
-        $span = $this->client->startTrace($operationName, [
+        $span = $this->client->startServerSpan($operationName, [
             'http.method' => $request->method(),
             'http.url' => $request->fullUrl(),
             'http.route' => $request->route()?->uri() ?? $request->path(),
             'http.user_agent' => $request->userAgent(),
             'http.client_ip' => $request->ip(),
-        ]);
+        ], $parentContext);
 
         // Activate span in context so child spans can use it as parent
         $scope = $span->activate();
@@ -73,7 +86,9 @@ class TracekitMiddleware
             throw $e;
         } finally {
             // Detach scope and flush traces
-            $scope->detach();
+            // Suppress scope ordering warnings from OpenTelemetry debug mode
+            // This can happen when nested HTTP calls create intermediate scopes
+            @$scope->detach();
             $this->client->flush();
         }
     }

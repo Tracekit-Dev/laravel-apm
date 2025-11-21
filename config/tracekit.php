@@ -108,7 +108,7 @@ return [
     |--------------------------------------------------------------------------
     |
     | Enable live code debugging with breakpoints and variable inspection.
-    | 
+    |
     | - enabled: Master switch for code monitoring features
     | - poll_interval: How often to check for new breakpoints (in seconds)
     |   Supported intervals: 1, 5, 10, 15, 30, 60, 300, 600
@@ -123,4 +123,28 @@ return [
         'max_variable_depth' => env('TRACEKIT_CODE_MONITORING_MAX_DEPTH', 3), // nested array/object depth
         'max_string_length' => env('TRACEKIT_CODE_MONITORING_MAX_STRING', 1000), // truncate long strings
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Service Name Mappings
+    |--------------------------------------------------------------------------
+    |
+    | Map hostnames to service names for peer.service attribute in distributed
+    | tracing. Useful for mapping localhost URLs to actual service names.
+    |
+    | Example: ['localhost:8082' => 'go-test-app', 'localhost:8084' => 'node-test-app']
+    |
+    */
+    'service_name_mappings' => [],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Suppress Errors
+    |--------------------------------------------------------------------------
+    |
+    | Suppress OpenTelemetry internal error output (export failures, etc.)
+    | Set to false in production if you want to see export errors in logs.
+    |
+    */
+    'suppress_errors' => env('TRACEKIT_SUPPRESS_ERRORS', true),
 ];

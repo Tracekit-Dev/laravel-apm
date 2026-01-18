@@ -48,6 +48,78 @@ Get your API key at [https://app.tracekit.dev](https://app.tracekit.dev)
 
 Your Laravel app is now automatically traced. Visit your TraceKit dashboard to see your traces.
 
+## Local Development
+
+Debug your Laravel application locally without creating a cloud account using TraceKit Local UI.
+
+### Quick Start
+
+```bash
+# Install Local UI globally
+npm install -g @tracekit/local-ui
+
+# Start it
+tracekit-local
+```
+
+The Local UI will start at `http://localhost:9999` and automatically open in your browser.
+
+### How It Works
+
+When running in `local` or `development` environment (Laravel's `APP_ENV`), the SDK automatically:
+
+1. Detects if Local UI is running at `http://localhost:9999`
+2. Sends traces to both Local UI and cloud (if API key is present)
+3. Falls back gracefully if Local UI is not available
+
+**No code changes needed!** Just set your `.env`:
+
+```env
+APP_ENV=local
+TRACEKIT_API_KEY=your-key  # Optional - works without it!
+```
+
+Then run your app:
+
+```bash
+php artisan serve
+```
+
+You'll see traces appear in real-time at `http://localhost:9999`.
+
+### Features
+
+- Real-time trace viewing in your browser
+- Works completely offline
+- No cloud account required
+- Zero configuration
+- Automatic cleanup (1000 traces max, 1 hour retention)
+
+### Local-Only Development
+
+To use Local UI without cloud sending:
+
+```env
+APP_ENV=local
+# Don't set TRACEKIT_API_KEY
+```
+
+Traces will only go to Local UI.
+
+### Disabling Local UI
+
+To disable automatic Local UI detection:
+
+```env
+APP_ENV=production
+# or don't run Local UI
+```
+
+### Learn More
+
+- GitHub: [https://github.com/Tracekit-Dev/local-debug-ui](https://github.com/Tracekit-Dev/local-debug-ui)
+- npm: [@tracekit/local-ui](https://www.npmjs.com/package/@tracekit/local-ui)
+
 ## Configuration
 
 Publish the configuration file:

@@ -18,6 +18,7 @@ use OpenTelemetry\SDK\Trace\SpanProcessorInterface;
 use OpenTelemetry\SDK\Trace\ReadableSpanInterface;
 use OpenTelemetry\SDK\Trace\ReadWriteSpanInterface;
 use OpenTelemetry\SDK\Trace\TracerProvider;
+use OpenTelemetry\SDK\Common\Future\CancellationInterface;
 use OpenTelemetry\Contrib\Otlp\SpanExporter;
 use OpenTelemetry\Contrib\Otlp\OtlpHttpTransportFactory;
 use OpenTelemetry\SemConv\ResourceAttributes;
@@ -42,7 +43,7 @@ class LocalUISpanProcessor implements SpanProcessorInterface
         $this->spans[] = $span;
     }
 
-    public function forceFlush(): bool
+    public function forceFlush(?CancellationInterface $cancellation = null): bool
     {
         if (empty($this->spans)) {
             return true;

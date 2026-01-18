@@ -58,8 +58,13 @@ class LocalUISpanProcessor implements SpanProcessorInterface
                 )
             );
 
-            // Export the spans
-            $exporter->export($this->spans);
+            // Convert ReadableSpanInterface to SpanDataInterface
+            $spanData = array_map(function($span) {
+                return $span->toSpanData();
+            }, $this->spans);
+
+            // Export the span data
+            $exporter->export($spanData);
 
             if (!$this->hasLogged) {
                 Log::info('🔍 Sent traces to Local UI');

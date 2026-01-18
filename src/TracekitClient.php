@@ -76,9 +76,9 @@ class LocalUISpanProcessor implements SpanProcessorInterface
         }
     }
 
-    public function shutdown(): bool
+    public function shutdown(?CancellationInterface $cancellation = null): bool
     {
-        return $this->forceFlush();
+        return $this->forceFlush($cancellation);
     }
 }
 

@@ -2,6 +2,8 @@
 
 namespace TraceKit\Laravel;
 
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use OpenTelemetry\API\Trace\SpanInterface;
 use OpenTelemetry\API\Trace\SpanKind;
 use OpenTelemetry\API\Trace\StatusCode;
@@ -12,10 +14,72 @@ use OpenTelemetry\SDK\Common\Attribute\Attributes;
 use OpenTelemetry\SDK\Resource\ResourceInfo;
 use OpenTelemetry\SDK\Resource\ResourceInfoFactory;
 use OpenTelemetry\SDK\Trace\SpanProcessor\SimpleSpanProcessor;
+use OpenTelemetry\SDK\Trace\SpanProcessorInterface;
+use OpenTelemetry\SDK\Trace\ReadableSpanInterface;
+use OpenTelemetry\SDK\Trace\ReadWriteSpanInterface;
 use OpenTelemetry\SDK\Trace\TracerProvider;
 use OpenTelemetry\Contrib\Otlp\SpanExporter;
 use OpenTelemetry\Contrib\Otlp\OtlpHttpTransportFactory;
 use OpenTelemetry\SemConv\ResourceAttributes;
+
+/**
+ * Custom span processor that sends traces to Local UI
+ */
+class LocalUISpanProcessor implements SpanProcessorInterface
+{
+    private array $spans = [];
+    private const LOCAL_UI_TRACES_URL = 'http://localhost:9999/v1/traces';
+    private bool $hasLogged = false;
+
+    public function onStart(ReadWriteSpanInterface $span, ContextInterface $parentContext): void
+    {
+        // No action needed on start
+    }
+
+    public function onEnd(ReadableSpanInterface $span): void
+    {
+        // Collect span data
+        $this->spans[] = $span;
+    }
+
+    public function forceFlush(): bool
+    {
+        if (empty($this->spans)) {
+            return true;
+        }
+
+        try {
+            // Convert spans to OTLP format
+            $exporter = new SpanExporter(
+                (new OtlpHttpTransportFactory())->create(
+                    self::LOCAL_UI_TRACES_URL,
+                    'application/json'
+                )
+            );
+
+            // Export the spans
+            $exporter->export($this->spans);
+
+            if (!$this->hasLogged) {
+                Log::info('🔍 Sent traces to Local UI');
+                $this->hasLogged = true;
+            }
+
+            $this->spans = [];
+            return true;
+        } catch (\Exception $e) {
+            // Silently fail - don't block trace sending
+            Log::debug('Failed to send traces to Local UI: ' . $e->getMessage());
+            $this->spans = [];
+            return false;
+        }
+    }
+
+    public function shutdown(): bool
+    {
+        return $this->forceFlush();
+    }
+}
 
 class TracekitClient
 {
@@ -25,6 +89,9 @@ class TracekitClient
     private string $apiKey;
     private string $serviceName;
     private bool $enabled;
+    private ?bool $localUIAvailable = null;
+    private const LOCAL_UI_HEALTH_URL = 'http://localhost:9999/api/health';
+    private const LOCAL_UI_TRACES_URL = 'http://localhost:9999/v1/traces';
 
     public function __construct()
     {
@@ -49,6 +116,14 @@ class TracekitClient
         // Create span processors
         $spanProcessors = [];
 
+        // Add Local UI processor in local/development environments
+        if (app()->environment('local', 'development')) {
+            if ($this->detectLocalUI()) {
+                $spanProcessors[] = new LocalUISpanProcessor();
+            }
+        }
+
+        // Add cloud API processor if enabled and API key exists
         if ($this->enabled && $this->apiKey) {
             // Configure OTLP HTTP transport
             $transportFactory = new OtlpHttpTransportFactory();
@@ -207,6 +282,31 @@ class TracekitClient
     public function getTracer(): TracerInterface
     {
         return $this->tracer;
+    }
+
+    /**
+     * Detect if TraceKit Local UI is running at localhost:9999
+     */
+    private function detectLocalUI(): bool
+    {
+        // Cache the result to avoid multiple health checks
+        if ($this->localUIAvailable !== null) {
+            return $this->localUIAvailable;
+        }
+
+        try {
+            $response = Http::timeout(1)->get(self::LOCAL_UI_HEALTH_URL);
+            $this->localUIAvailable = $response->successful();
+
+            if ($this->localUIAvailable) {
+                Log::info('🔍 Local UI detected at http://localhost:9999');
+            }
+
+            return $this->localUIAvailable;
+        } catch (\Exception $e) {
+            $this->localUIAvailable = false;
+            return false;
+        }
     }
 
     /**

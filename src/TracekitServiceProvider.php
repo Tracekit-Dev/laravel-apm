@@ -30,6 +30,11 @@ class TracekitServiceProvider extends ServiceProvider
             return new TracekitClient();
         });
 
+        // Register facade accessor
+        $this->app->singleton('tracekit', function ($app) {
+            return $app->make(TracekitClient::class);
+        });
+
         // Register SnapshotClient as singleton
         $this->app->singleton(SnapshotClient::class, function ($app) {
             // Extract base URL from endpoint (remove /v1/traces suffix)

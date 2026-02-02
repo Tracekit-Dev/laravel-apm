@@ -16,6 +16,7 @@ Zero-config distributed tracing and performance monitoring for Laravel applicati
 - **Slow Query Detection** - Automatically highlight slow database queries
 - **Error Tracking** - Capture exceptions with full context
 - **Code Monitoring** - Live debugging with breakpoints and variable inspection
+- **Metrics API** - Counter, Gauge, and Histogram metrics with automatic OTLP export
 - **Low Overhead** - < 5% performance impact
 
 ## Installation
@@ -363,6 +364,212 @@ Route::post('/checkout', function (Request $request) {
 3. Exception event includes `exception.stacktrace` for code discovery
 4. TraceKit backend parses stack traces and indexes your code locations
 5. Visit the "Browse Code" tab in `/snapshots` to see discovered code
+
+## Metrics
+
+Track custom metrics using Counter, Gauge, and Histogram types. Metrics are automatically exported to TraceKit using the OTLP protocol.
+
+### Basic Usage
+
+```php
+use TraceKit\Laravel\Facades\Tracekit;
+
+// Initialize metrics (typically in a service provider or route file)
+$requestCounter = Tracekit::counter('http.requests.total', ['service' => 'my-app']);
+$activeRequestsGauge = Tracekit::gauge('http.requests.active', ['service' => 'my-app']);
+$durationHistogram = Tracekit::histogram('http.request.duration', ['unit' => 'ms']);
+
+// Use metrics in your routes or controllers
+$requestCounter->inc();  // Increment by 1
+$activeRequestsGauge->set(42);  // Set to specific value
+$durationHistogram->record(125.5);  // Record observation
+```
+
+### Counter
+
+Counters track monotonically increasing values (requests, errors, items processed):
+
+```php
+$requestCounter = Tracekit::counter('http.requests.total', [
+    'service' => 'my-app',
+    'environment' => config('app.env')
+]);
+
+$requestCounter->inc();  // Increment by 1
+$requestCounter->add(5);  // Add specific amount
+```
+
+### Gauge
+
+Gauges track point-in-time values that can go up or down (active connections, queue size):
+
+```php
+$activeUsersGauge = Tracekit::gauge('users.active', ['service' => 'my-app']);
+
+$activeUsersGauge->set(150);  // Set to specific value
+$activeUsersGauge->inc();  // Increment by 1
+$activeUsersGauge->dec();  // Decrement by 1
+```
+
+### Histogram
+
+Histograms track value distributions (request duration, payload sizes):
+
+```php
+$durationHistogram = Tracekit::histogram('http.request.duration', ['unit' => 'ms']);
+
+$startTime = microtime(true);
+// ... do work ...
+$duration = (microtime(true) - $startTime) * 1000;
+$durationHistogram->record($duration);
+```
+
+### HTTP Request Metrics Example
+
+Track HTTP request metrics in your routes:
+
+```php
+use TraceKit\Laravel\Facades\Tracekit;
+
+// Initialize metrics once (e.g., in routes/web.php or a service provider)
+$requestCounter = Tracekit::counter('http.requests.total', ['service' => 'my-app']);
+$activeRequestsGauge = Tracekit::gauge('http.requests.active', ['service' => 'my-app']);
+$durationHistogram = Tracekit::histogram('http.request.duration', ['unit' => 'ms']);
+$errorCounter = Tracekit::counter('http.errors.total', ['service' => 'my-app']);
+
+Route::get('/api/users', function () use ($requestCounter, $activeRequestsGauge, $durationHistogram) {
+    $startTime = microtime(true);
+    $activeRequestsGauge->inc();
+
+    try {
+        $users = User::all();
+        return response()->json($users);
+    } finally {
+        $requestCounter->inc();
+        $activeRequestsGauge->dec();
+        $duration = (microtime(true) - $startTime) * 1000;
+        $durationHistogram->record($duration);
+    }
+});
+```
+
+### Middleware Example
+
+Track metrics across all routes using middleware:
+
+```php
+<?php
+
+namespace App\Http\Middleware;
+
+use Closure;
+use Illuminate\Http\Request;
+use TraceKit\Laravel\Facades\Tracekit;
+
+class MetricsMiddleware
+{
+    private $requestCounter;
+    private $activeRequestsGauge;
+    private $durationHistogram;
+    private $errorCounter;
+
+    public function __construct()
+    {
+        $this->requestCounter = Tracekit::counter('http.requests.total', ['service' => config('app.name')]);
+        $this->activeRequestsGauge = Tracekit::gauge('http.requests.active', ['service' => config('app.name')]);
+        $this->durationHistogram = Tracekit::histogram('http.request.duration', ['unit' => 'ms']);
+        $this->errorCounter = Tracekit::counter('http.errors.total', ['service' => config('app.name')]);
+    }
+
+    public function handle(Request $request, Closure $next)
+    {
+        $startTime = microtime(true);
+        $this->activeRequestsGauge->inc();
+
+        $response = $next($request);
+
+        $this->requestCounter->inc();
+        $this->activeRequestsGauge->dec();
+        $duration = (microtime(true) - $startTime) * 1000;
+        $this->durationHistogram->record($duration);
+
+        if ($response->status() >= 400) {
+            $this->errorCounter->inc();
+        }
+
+        return $response;
+    }
+}
+```
+
+### Tags for Dimensional Analysis
+
+Add tags to metrics for multi-dimensional analysis:
+
+```php
+// Track requests by endpoint
+$requestCounter = Tracekit::counter('http.requests.total', [
+    'service' => 'my-app',
+    'endpoint' => '/api/users',
+    'method' => 'GET'
+]);
+
+// Track cache hits/misses
+$cacheHitCounter = Tracekit::counter('cache.hits', [
+    'service' => 'my-app',
+    'cache_type' => 'redis'
+]);
+```
+
+### Common Use Cases
+
+**Database Metrics:**
+```php
+$queryCounter = Tracekit::counter('db.queries.total', ['database' => 'mysql']);
+$queryDuration = Tracekit::histogram('db.query.duration', ['unit' => 'ms']);
+
+DB::listen(function ($query) use ($queryCounter, $queryDuration) {
+    $queryCounter->inc();
+    $queryDuration->record($query->time);
+});
+```
+
+**Queue Metrics:**
+```php
+$jobCounter = Tracekit::counter('queue.jobs.total', ['queue' => 'default']);
+$jobDuration = Tracekit::histogram('queue.job.duration', ['unit' => 'ms']);
+
+// In your job class
+public function handle()
+{
+    $startTime = microtime(true);
+
+    // ... job logic ...
+
+    $duration = (microtime(true) - $startTime) * 1000;
+    $jobDuration->record($duration);
+    $jobCounter->inc();
+}
+```
+
+**Business Metrics:**
+```php
+$ordersCounter = Tracekit::counter('orders.created', ['service' => 'my-app']);
+$revenueGauge = Tracekit::gauge('revenue.total', ['currency' => 'USD']);
+
+// Track business events
+$ordersCounter->inc();
+$revenueGauge->set($totalRevenue);
+```
+
+### Metric Export
+
+Metrics are automatically buffered and exported to TraceKit:
+- **Buffer size**: 100 metrics
+- **Export interval**: 10 seconds
+- **Format**: OTLP (OpenTelemetry Protocol)
+
+Metrics are flushed automatically when the buffer is full or on application shutdown.
 
 ## Automatic Service Discovery
 

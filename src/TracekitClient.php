@@ -96,15 +96,25 @@ class TracekitClient
     private string $serviceName;
     private bool $enabled;
     private ?bool $localUIAvailable = null;
+    private ?MetricsRegistry $metricsRegistry = null;
     private const LOCAL_UI_HEALTH_URL = 'http://localhost:9999/api/health';
     private const LOCAL_UI_TRACES_URL = 'http://localhost:9999/v1/traces';
 
     public function __construct()
     {
-        $this->endpoint = config('tracekit.endpoint');
+        // Get base config
+        $baseEndpoint = config('tracekit.endpoint', 'app.tracekit.dev');
+        $tracesPath = config('tracekit.traces_path', '/v1/traces');
+        $metricsPath = config('tracekit.metrics_path', '/v1/metrics');
+
         $this->apiKey = config('tracekit.api_key');
         $this->serviceName = config('tracekit.service_name');
         $this->enabled = config('tracekit.enabled', true);
+
+        // Resolve endpoints
+        $useSSL = !str_starts_with($baseEndpoint, 'http://');
+        $this->endpoint = $this->resolveEndpoint($baseEndpoint, $tracesPath, $useSSL);
+        $metricsEndpoint = $this->resolveEndpoint($baseEndpoint, $metricsPath, $useSSL);
 
         // Suppress OpenTelemetry error output (export failures, etc.) in development
         // Set TRACEKIT_SUPPRESS_ERRORS=false in .env to see export errors
@@ -160,6 +170,9 @@ class TracekitClient
             'tracekit-laravel',
             '1.0.0'
         );
+
+        // Initialize metrics registry
+        $this->metricsRegistry = new MetricsRegistry($metricsEndpoint, $this->apiKey, $this->serviceName);
     }
 
     public function startTrace(string $operationName, array $attributes = []): SpanInterface
@@ -278,13 +291,6 @@ class TracekitClient
         }
     }
 
-    public function shutdown(): void
-    {
-        if ($this->tracerProvider instanceof TracerProvider) {
-            $this->tracerProvider->shutdown();
-        }
-    }
-
     public function getTracer(): TracerInterface
     {
         return $this->tracer;
@@ -366,5 +372,95 @@ class TracekitClient
     public function getRootSpanId(): ?string
     {
         return null; // Not needed with OpenTelemetry SDK
+    }
+
+    /**
+     * Resolve endpoint URL from base endpoint and path
+     */
+    private function resolveEndpoint(string $endpoint, string $path, bool $useSSL = true): string
+    {
+        // If endpoint has a scheme
+        if (str_starts_with($endpoint, 'http://') || str_starts_with($endpoint, 'https://')) {
+            $endpoint = rtrim($endpoint, '/');
+            $trimmed = preg_replace('#^https?://#', '', $endpoint);
+
+            // If endpoint has a path component
+            if (str_contains($trimmed, '/')) {
+                // Always extract base URL and append correct path
+                $base = $this->extractBaseURL($endpoint);
+                if ($path === '') {
+                    return $base;
+                }
+                return $base . $path;
+            }
+
+            // Just host with scheme, add the path
+            return $endpoint . $path;
+        }
+
+        // No scheme - build URL with scheme
+        $scheme = $useSSL ? 'https://' : 'http://';
+        $endpoint = rtrim($endpoint, '/');
+        return $scheme . $endpoint . $path;
+    }
+
+    /**
+     * Extract base URL (scheme + host) from full URL
+     */
+    private function extractBaseURL(string $fullURL): string
+    {
+        // Check if URL contains known service-specific paths
+        $hasServicePath = str_contains($fullURL, '/v1/traces') ||
+                          str_contains($fullURL, '/v1/metrics') ||
+                          str_contains($fullURL, '/api/v1/traces') ||
+                          str_contains($fullURL, '/api/v1/metrics');
+
+        // If it doesn't have a service-specific path, keep the URL as-is
+        if (!$hasServicePath) {
+            return $fullURL;
+        }
+
+        $parsed = parse_url($fullURL);
+        $base = $parsed['scheme'] . '://' . $parsed['host'];
+        if (isset($parsed['port'])) {
+            $base .= ':' . $parsed['port'];
+        }
+        return $base;
+    }
+
+    /**
+     * Get or create a counter metric
+     */
+    public function counter(string $name, array $tags = []): Counter
+    {
+        return $this->metricsRegistry->counter($name, $tags);
+    }
+
+    /**
+     * Get or create a gauge metric
+     */
+    public function gauge(string $name, array $tags = []): Gauge
+    {
+        return $this->metricsRegistry->gauge($name, $tags);
+    }
+
+    /**
+     * Get or create a histogram metric
+     */
+    public function histogram(string $name, array $tags = []): Histogram
+    {
+        return $this->metricsRegistry->histogram($name, $tags);
+    }
+
+    /**
+     * Shutdown the client and flush all pending data
+     */
+    public function shutdown(): void
+    {
+        if ($this->metricsRegistry) {
+            $this->metricsRegistry->shutdown();
+        }
+
+        $this->tracerProvider->shutdown();
     }
 }

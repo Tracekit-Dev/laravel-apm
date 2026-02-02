@@ -16,10 +16,31 @@ return [
     | TraceKit Endpoint
     |--------------------------------------------------------------------------
     |
-    | The OTLP endpoint for sending traces. Default is TraceKit's hosted service.
+    | The base endpoint for TraceKit services. Can be just the host (app.tracekit.dev)
+    | or a full URL with scheme and path. Paths will be automatically appended.
     |
     */
-    'endpoint' => env('TRACEKIT_ENDPOINT', 'https://app.tracekit.dev/v1/traces'),
+    'endpoint' => env('TRACEKIT_ENDPOINT', 'app.tracekit.dev'),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Traces Path
+    |--------------------------------------------------------------------------
+    |
+    | The path for the traces endpoint. Default is /v1/traces.
+    |
+    */
+    'traces_path' => env('TRACEKIT_TRACES_PATH', '/v1/traces'),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Metrics Path
+    |--------------------------------------------------------------------------
+    |
+    | The path for the metrics endpoint. Default is /v1/metrics.
+    |
+    */
+    'metrics_path' => env('TRACEKIT_METRICS_PATH', '/v1/metrics'),
 
     /*
     |--------------------------------------------------------------------------

@@ -365,6 +365,112 @@ Route::post('/checkout', function (Request $request) {
 4. TraceKit backend parses stack traces and indexes your code locations
 5. Visit the "Browse Code" tab in `/snapshots` to see discovered code
 
+## PII Scrubbing
+
+TraceKit Laravel SDK automatically scans snapshot variables for sensitive data before sending to the server. This ensures that passwords, API keys, and other credentials never leave your application.
+
+### How It Works
+
+Sensitive data is detected in two ways:
+
+1. **By variable name** — Variables with sensitive names are redacted as `[REDACTED:sensitive_name]`
+2. **By value pattern** — Values matching known sensitive patterns are redacted as `[REDACTED:type]`
+
+### Auto-Detected Sensitive Names
+
+The SDK flags variables whose names contain any of the following (case-insensitive):
+
+`password`, `passwd`, `pwd`, `secret`, `token`, `key`, `credential`, `api_key`, `apikey`
+
+Name matching uses **letter-based boundaries** (not `\b`) so compound names like `api_key`, `user_token`, and `db_password` are correctly detected.
+
+### Auto-Detected Value Patterns
+
+| Pattern | Example | Redacted As |
+|---------|---------|-------------|
+| Credit card numbers | `4111111111111111` | `[REDACTED:credit_card]` |
+| Email addresses | `user@example.com` | `[REDACTED:email]` |
+| Social Security Numbers | `123-45-6789` | `[REDACTED:ssn]` |
+| JWT tokens | `eyJhbGciOiJIUzI1NiIs...` | `[REDACTED:jwt]` |
+| AWS access keys | `AKIAIOSFODNN7EXAMPLE` | `[REDACTED:aws_key]` |
+| Stripe keys | `sk_live_abc123...` | `[REDACTED:stripe_key]` |
+| Private keys | `-----BEGIN RSA PRIVATE KEY-----` | `[REDACTED:private_key]` |
+
+### Example
+
+```php
+tracekit_snapshot('user-login', [
+    'username' => 'jdoe',              // Sent as-is
+    'password' => 'secret123',          // -> [REDACTED:sensitive_name]
+    'api_key' => 'sk_live_abc...',      // -> [REDACTED:sensitive_name]
+    'email' => 'user@example.com',      // -> [REDACTED:email]
+    'card' => '4111111111111111',       // -> [REDACTED:credit_card]
+]);
+```
+
+PII scrubbing is **enabled by default** and requires no configuration.
+
+## Kill Switch
+
+TraceKit provides a server-side toggle to disable code monitoring per service without deploying code changes.
+
+### How It Works
+
+When the kill switch is enabled for your service on the TraceKit dashboard (or via API), all snapshot captures are suppressed. No breakpoint data is sent.
+
+**Important:** Laravel uses a per-request architecture (process-per-request), so kill switch state cannot be held in memory across requests. Instead, the SDK checks kill switch state via **Laravel Cache** on each request.
+
+```php
+// No code changes needed — the SDK handles this automatically.
+// Kill switch state is cached and refreshed on each poll cycle.
+
+// To check kill switch state manually:
+$client = app(\TraceKit\Laravel\SnapshotClient::class);
+// The client checks cache for kill switch state before every capture
+```
+
+### Controlling the Kill Switch
+
+- **Dashboard**: Toggle code monitoring on/off per service in the TraceKit dashboard
+- **API**: `POST /api/services/:name/kill-switch` with `{"enabled": true}` or `{"enabled": false}`
+
+When disabled, code monitoring resumes automatically on the next poll cycle.
+
+## SSE Real-time Updates
+
+**Not applicable** for Laravel's request lifecycle. Laravel processes each request in a separate PHP process, so persistent SSE connections are not feasible.
+
+Instead, breakpoint updates are received via **polling** (default 30-second interval) and cached using Laravel's cache driver. This ensures breakpoint state is shared across all request processes.
+
+Configure the poll interval in your `.env`:
+
+```env
+TRACEKIT_CODE_MONITORING_POLL_INTERVAL=30
+```
+
+## Circuit Breaker
+
+The circuit breaker protects your application if the TraceKit backend becomes unreachable.
+
+### How It Works
+
+1. The SDK tracks consecutive snapshot capture failures
+2. After **3 failures within 60 seconds**, code monitoring is automatically paused
+3. After a **5-minute cooldown**, the circuit breaker resets and captures resume
+
+```php
+// No configuration needed — circuit breaker is built into the SnapshotClient.
+// When tripped, you'll see a log message:
+// "[TraceKit] Circuit breaker open — pausing code monitoring for 5 minutes"
+```
+
+### Behavior When Tripped
+
+- All `tracekit_snapshot()` calls become no-ops (zero overhead)
+- Distributed tracing and metrics continue to function normally
+- The SDK automatically retries after the cooldown period
+- No manual intervention required
+
 ## Metrics
 
 Track custom metrics using Counter, Gauge, and Histogram types. Metrics are automatically exported to TraceKit using the OTLP protocol.
